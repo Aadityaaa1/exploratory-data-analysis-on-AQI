@@ -1,0 +1,169 @@
+import numpy as np # linear algebra
+import pandas as pd # data processing, CSV file I/O (e.g. pd.read_csv)
+
+import warnings
+
+import os
+for dirname, _, filenames in os.walk("C:\\Users\\aadit\\Desktop\\Python eda"):
+    for filename in filenames:
+        print(os.path.join(dirname, filename))
+
+#importing day-wise data of cities
+cities= pd.read_csv('C:\\Users\\aadit\\Desktop\\Python eda\\city_day.csv')
+
+#visualizing the top rows of the dataset
+cities.head()
+
+#getting information about the columns in our dataset
+cities.info()
+
+print(cities.shape)
+
+#converting column Date into DateTime format
+cities['Date']=pd.to_datetime(cities['Date'])
+
+import missingno as msno
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+#finding the proportion of missing values in each column
+missing=pd.DataFrame(cities.isna().sum()/len(cities))
+missing.columns=['Proportion']
+print(missing.sort_values(by='Proportion', ascending=False))
+
+#plotting the number of non-null values in each column
+msno.bar(cities)
+
+#filling missing values with zero - can also be imputed by mean of the observations
+cities.fillna(0,inplace=True)
+
+#extracting year and month for each record
+cities['year'] = pd.DatetimeIndex(cities['Date']).year
+cities['month'] = pd.DatetimeIndex(cities['Date']).month
+
+#clubbing all particulate matter
+cities['PM']=cities['PM2.5'] + cities['PM10']
+
+#clubbing nitrogen oxides
+cities['Nitric']=cities['NO'] + cities['NO2']+ cities['NOx']
+
+#clubbing Benzene, toluene and Xylene together
+cities['BTX']=cities['Benzene'] + cities['Toluene']+ cities['Xylene']
+
+#grouping pollutant levels in every city by year and month
+cities_group_ym=cities.groupby(['City','year','month'])[['PM','Nitric','CO','NH3','O3','SO2','BTX','AQI']].mean()
+
+cities_group_ym=cities_group_ym.reset_index(['City','year','month'])
+cities_group_ym.head()
+
+#plotting the correlation matrix with sns heatmap
+corr_matrix = cities_group_ym.iloc[:,3:].corr()
+print(corr_matrix)
+fig = plt.figure(figsize = (6, 4))
+sns.heatmap(corr_matrix, vmin=-1, vmax=1)
+plt.show()
+
+most_polluted=['Delhi','Patna','Ahmedabad','Gurugram','Kolkata']
+
+#forming two df's- containing data from 2019 and 2020 respectively
+cities_2019= cities_group_ym[(cities_group_ym['City'].isin(most_polluted)) & (cities_group_ym['year']==2019)]
+cities_2020= cities_group_ym[(cities_group_ym['City'].isin(most_polluted)) & (cities_group_ym['year']==2020)]
+
+cities_19_vs_20 = pd.merge(cities_2019, cities_2020, how="inner", on=["City", "month"])
+
+#computing the percentage change in AQI
+cities_19_vs_20['AQI Percentage change']=100*(cities_19_vs_20['AQI_y']-cities_19_vs_20['AQI_x'])/cities_19_vs_20['AQI_x']
+
+#plotting AQI change for a few highly polluted cities
+fig = plt.figure(figsize=(10,7))
+(sns.lineplot(
+    data=cities_19_vs_20,
+    x="month", y="AQI Percentage change",hue='City',linewidth=4.5,
+    markers=True, dashes=False
+))
+
+# forming two seperate dataframes for years 2019 and 2020
+cities_19_all = cities_group_ym[cities_group_ym['year'] == 2019]
+cities_20_all = cities_group_ym[cities_group_ym['year'] == 2020]
+
+# joining the two df's to get a comparitive view of AQI value in 2019 and 2020
+cities_19_vs_20_all = pd.merge(cities_19_all, cities_20_all, how="inner", on=["City", "month"])
+cities_19_vs_20_all['AQI Percentage change'] = 100 * (cities_19_vs_20_all['AQI_y'] - cities_19_vs_20_all['AQI_x']) / \
+                                               cities_19_vs_20_all['AQI_x']
+
+# lockdown months- which we will be analysing
+months = [3, 4, 5, 6]
+fig, axes = plt.subplots(ncols=2, nrows=2, figsize=(12, 7))
+
+# plotting the top 10 cities for the months March-June 2020 which had the most improvement in AQI
+for i, ax in zip(months, axes.flat):
+    cities_AQI_comp = cities_19_vs_20_all[
+        (cities_19_vs_20_all['AQI_y'] != 0.000000) & (cities_19_vs_20_all['month'] == i)]
+    cities_AQI_comp_10 = cities_AQI_comp[['City', 'month', 'AQI_x', 'AQI_y', 'AQI Percentage change']].sort_values(
+        by='AQI Percentage change', ascending=True).iloc[:10, :]
+
+    h = sns.barplot(data=cities_AQI_comp_10, x="City", y='AQI Percentage change', palette="flare", alpha=.9, ax=ax)
+    h.set(title='Month : {}'.format(i))
+    h.set_xticklabels(h.get_xticklabels(), rotation=45)
+
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# cities displayed above which showed a higher AQI in the lockdown months of 2020 as compared to 2019
+anomalies = ['Gurugram', 'Jorapokhar', 'Brajrajnagar', 'Talcher']
+
+# understanding the rise of pollutants which contributed to the increased AQI in 2020 by comparing the levels of each pollutant in 2019 and 2020
+for i in anomalies:
+    city_19_20 = cities_group_ym[(cities_group_ym['City'] == i) &
+                                 (cities_group_ym['year'].isin([2019, 2020])) &
+                                 (cities_group_ym['month'] < 8)]
+
+    sns.set_theme(style="whitegrid")
+    fig = plt.figure()
+    fig, axes = plt.subplots(2, 4, figsize=(12, 5))
+
+    sns.barplot(
+        data=city_19_20,
+        x="month", y="AQI", hue="year",
+        palette="dark", alpha=.6, ax=axes[0, 0]
+    )
+    sns.lineplot(
+        data=city_19_20,
+        x="month", y="PM", hue="year", palette='dark',
+        markers=True, dashes=False, ax=axes[0, 1]
+    )
+    sns.lineplot(
+        data=city_19_20,
+        x="month", y="Nitric", hue="year", palette='dark',
+        markers=True, dashes=False, ax=axes[0, 2]
+    )
+    sns.lineplot(
+        data=city_19_20,
+        x="month", y="CO", hue="year", palette='dark',
+        markers=True, dashes=False, ax=axes[0, 3]
+    )
+    sns.lineplot(
+        data=city_19_20,
+        x="month", y="BTX", hue="year", palette='dark',
+        markers=True, dashes=False, ax=axes[1, 0]
+    )
+    sns.lineplot(
+        data=city_19_20,
+        x="month", y="SO2", hue="year", palette='dark',
+        markers=True, dashes=False, ax=axes[1, 1]
+    )
+    sns.lineplot(
+        data=city_19_20,
+        x="month", y="NH3", hue="year", palette='dark',
+        markers=True, ax=axes[1, 2]
+    )
+    sns.lineplot(
+        data=city_19_20,
+        x="month", y="O3", hue="year", palette='dark',
+        markers=True, ax=axes[1, 3]
+    )
+
+    fig.tight_layout()
+    print(i, ':')
+    plt.show()
